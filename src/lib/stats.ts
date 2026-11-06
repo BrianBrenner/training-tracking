@@ -35,13 +35,6 @@ export function averageDays(rows: { days: ActivityCounts }[]): ActivityCounts {
 export const inRange = <T extends { date: DateStr }>(rows: T[], from: DateStr, to: DateStr) =>
   rows.filter((r) => r.date >= from && r.date <= to);
 
-/** Most recent date matching, or undefined. */
-export function lastDate(entries: Entry[], match: (e: Entry) => boolean): DateStr | undefined {
-  let last: DateStr | undefined;
-  for (const e of entries) if (match(e) && (!last || e.date > last)) last = e.date;
-  return last;
-}
-
 export const deloadOn = (deloads: Deload[], date: DateStr) =>
   deloads.find((d) => d.startDate <= date && date <= d.endDate);
 

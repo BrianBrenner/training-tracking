@@ -1,11 +1,11 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
-import { ActivityDot, PageHeader, Section } from "../components/ui";
+import { ActivityDot, PageHeader } from "../components/ui";
 import { addDays, ago, daysBetween, formatDay, formatRange, today, weekStart } from "../lib/dates";
 import { toggleDeloadWeek } from "../lib/deloads";
 import { entryLabel, useData } from "../lib/hooks";
-import { daysPerWeek, deloadOn, lastDate, lastDeload, latestInjury } from "../lib/stats";
-import { ACTIVITY_LABELS, type Activity } from "../types";
+import { daysPerWeek, deloadOn, lastDeload, latestInjury } from "../lib/stats";
+import { ACTIVITY_LABELS, type Activity, type Entry } from "../types";
 
 const TRACKED: Activity[] = ["climb", "hang", "lift"];
 
@@ -17,8 +17,8 @@ export function HomePage() {
   const now = today();
   const week = weekStart(now);
   const weekEnd = addDays(week, 6);
+  const weekDays = [0, 1, 2, 3, 4, 5, 6].map((n) => addDays(week, n));
   const [{ days }] = daysPerWeek(data.entries, [week]);
-  const thisWeek = data.entries.filter((e) => e.date >= week && e.date <= weekEnd);
   const deloadNow = deloadOn(data.deloads, now);
   const last = lastDeload(data.deloads, now);
   const every = data.settings.deloadEveryWeeks;
@@ -32,27 +32,53 @@ export function HomePage() {
   const dueForDeload = !deloadNow && every > 0 && weeksTraining >= every;
   const injury = latestInjury(data.injuries);
 
-  // This week's sessions by day, newest first.
-  const byDay = new Map<string, typeof thisWeek>();
+  // This week's sessions by day, Monday first, each day in the order logged.
+  const byDay = new Map<string, Entry[]>();
+  const thisWeek = data.entries
+    .filter((e) => e.date >= week && e.date <= weekEnd)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.updatedAt - b.updatedAt);
   for (const e of thisWeek) byDay.set(e.date, [...(byDay.get(e.date) ?? []), e]);
 
   return (
-    <div className="page">
+    <div className="page home">
       <PageHeader title="This week" large>
         <span className="muted small">{formatRange(week, weekEnd)}</span>
       </PageHeader>
 
-      <div className="tiles">
+      <div className="week-strip">
+        {weekDays.map((d) => {
+          const classes = [
+            "strip-day",
+            d === now && "today",
+            d > now && "future",
+            deloadOn(data.deloads, d) && "deload",
+          ];
+          return (
+            <Link key={d} to={`/day/${d}`} className={classes.filter(Boolean).join(" ")}>
+              <span className="strip-weekday">{formatDay(d, { weekday: "narrow" })}</span>
+              <span className="strip-num">{Number(d.slice(8))}</span>
+              <span className="strip-dots">
+                {(byDay.get(d) ?? []).map((e) => (
+                  <ActivityDot key={e.id} activity={e.activity} />
+                ))}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="goals">
         {TRACKED.map((a) => {
           const target = data.settings.targets[a];
           return (
-            <div key={a} className="tile" data-activity={a}>
-              <span className="tile-label">{ACTIVITY_LABELS[a]}</span>
-              <span className="tile-value">
-                {days[a]}
-                {target > 0 && <span className="muted">/{target}</span>}
+            <div key={a} className="goal" data-activity={a}>
+              <span className="goal-text">
+                <span>{ACTIVITY_LABELS[a]}</span>
+                <strong>
+                  {days[a]}
+                  {target > 0 && <span className="muted">/{target}</span>}
+                </strong>
               </span>
-              <span className="tile-sub">days</span>
               {target > 0 && (
                 <span className="progress">
                   <span style={{ width: `${Math.min(1, days[a] / target) * 100}%` }} />
@@ -63,75 +89,65 @@ export function HomePage() {
         })}
       </div>
 
-      <div className={`card deload-card ${deloadNow ? "active" : dueForDeload ? "due" : ""}`}>
-        <div>
-          <strong>{deloadNow ? "Deload week" : dueForDeload ? "Time for a deload?" : "Last deload"}</strong>
-          <p className="muted small">
-            {deloadNow
-              ? formatRange(deloadNow.startDate, deloadNow.endDate)
-              : last
-                ? `${formatRange(last.deload.startDate, last.deload.endDate)} · ${last.weeksSince} ${last.weeksSince === 1 ? "week" : "weeks"} ago`
-                : "None logged yet"}
-          </p>
-        </div>
-        <button
-          type="button"
-          className={`btn small ${deloadNow ? "" : "outline"}`}
-          onClick={() => toggleDeloadWeek(data.deloads, week)}
-        >
-          {deloadNow ? "Not a deload" : "Deload this week"}
-        </button>
-      </div>
-
-      <div className="since">
-        {TRACKED.map((a) => {
-          const d = lastDate(data.entries, (e) => e.activity === a);
-          return (
-            <div key={a}>
-              <ActivityDot activity={a} />
-              <span>{ACTIVITY_LABELS[a]}</span>
-              <span className="muted">{d ? ago(d, now) : "never"}</span>
-            </div>
-          );
-        })}
-        {injury && (
-          <Link to={`/injuries/${injury.id}`}>
-            <span className="dot injury" />
-            <span>Last tweak: {injury.area}</span>
-            <span className="muted">{ago(injury.date, now)}</span>
-          </Link>
-        )}
-      </div>
-
-      <Section
-        title="Sessions"
-        action={
-          <Link to={`/injuries/new?date=${now}`} className="btn small outline">
-            <Icon name="bandage" size={16} /> Flag a tweak
-          </Link>
-        }
-      >
-        {byDay.size === 0 ? (
-          <p className="empty">Nothing logged this week yet.</p>
-        ) : (
-          <ul className="day-list">
-            {[...byDay.entries()].map(([date, entries]) => (
-              <li key={date}>
-                <Link to={`/day/${date}`} className="day-list-date">
-                  {date === now ? "Today" : formatDay(date, { weekday: "long" })}
-                </Link>
+      {byDay.size === 0 ? (
+        <p className="empty">Nothing logged this week yet.</p>
+      ) : (
+        <ul className="week-sessions">
+          {[...byDay.entries()].map(([date, entries]) => (
+            <li key={date}>
+              <Link to={`/day/${date}`} className="week-sessions-day">
+                {date === now ? "Today" : formatDay(date, { weekday: "short" })}
+              </Link>
+              <div className="week-sessions-list">
                 {entries.map((e) => (
-                  <Link key={e.id} to={`/entries/${e.id}`} className="session-row">
+                  <Link key={e.id} to={`/entries/${e.id}`} className="week-session">
                     <ActivityDot activity={e.activity} />
-                    <span>{entryLabel(e, data)}</span>
-                    {e.effort && <span className="muted small">effort {e.effort}</span>}
+                    <span className="week-session-label">{entryLabel(e, data)}</span>
+                    {e.effort && (
+                      <span className="effort" aria-label={`Effort ${e.effort}`}>
+                        {e.effort}
+                      </span>
+                    )}
                   </Link>
                 ))}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="home-footer">
+        <div className={`home-footer-row ${deloadNow ? "deload-active" : dueForDeload ? "deload-due" : ""}`}>
+          <span className="home-footer-text">
+            <strong>{deloadNow ? "Deload week" : dueForDeload ? "Time for a deload?" : "Last deload"}</strong>
+            <span className="muted">
+              {deloadNow
+                ? formatRange(deloadNow.startDate, deloadNow.endDate)
+                : last
+                  ? `${formatDay(last.deload.startDate, { month: "short", day: "numeric" })} · ${last.weeksSince} ${last.weeksSince === 1 ? "wk" : "wks"} ago`
+                  : "none yet"}
+            </span>
+          </span>
+          <button type="button" className="btn small outline" onClick={() => toggleDeloadWeek(data.deloads, week)}>
+            {deloadNow ? "Undo" : "Deload this week"}
+          </button>
+        </div>
+        <div className="home-footer-row">
+          {injury ? (
+            <Link to={`/injuries/${injury.id}`} className="home-footer-text">
+              <strong>Last tweak</strong>
+              <span className="muted">
+                {injury.area} · {ago(injury.date, now)}
+              </span>
+            </Link>
+          ) : (
+            <span className="muted">No tweaks logged</span>
+          )}
+          <Link to={`/injuries/new?date=${now}`} className="btn small outline">
+            <Icon name="bandage" size={15} /> Flag a tweak
+          </Link>
+        </div>
+      </div>
 
       <button type="button" className="fab" onClick={() => navigate("/log")}>
         <Icon name="plus" size={22} /> Log session
